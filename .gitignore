@@ -1,0 +1,15 @@
+# Python bytecode (compiled files)
+__pycache__/
+*.py[cod]
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Playwright / User data
+user_data/
+
+# Các file hệ thống hoặc file nhạy cảm khác (nên có)
+.DS_Store
+.env
