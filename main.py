@@ -11,6 +11,10 @@ from crawler_core import TaxCrawler
 from fastapi import FastAPI
 from playwright.async_api import async_playwright
 from typing import List
+import pathlib
+
+# Xác định đường dẫn lưu data (ví dụ thư mục 'user_data' ngay tại project)
+USER_DATA_DIR = pathlib.Path(__file__).parent / "user_data"
 
 app = FastAPI()
 

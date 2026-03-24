@@ -15,5 +15,5 @@ class UAManager:
     def get_random_ua(self):
         # Lấy ngẫu nhiên cực nhanh từ list trong bộ nhớ RAM
         return random.choice(self.ua_list)
-
+        #return self.ua_list[1]
 ua_helper = UAManager()
