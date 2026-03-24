@@ -6,6 +6,7 @@ from ua_manager import ua_helper
 from proxy_manager import proxy_helper
 from locale_manager import locale_helper
 from timezone_manager import tz_helper
+from crawler_core import TaxCrawler
 
 from fastapi import FastAPI
 from playwright.async_api import async_playwright
@@ -13,29 +14,30 @@ from typing import List
 
 app = FastAPI()
 
-
 playwright = None
 browser = None
-MAX_RETRIES = 3  # Số lần thử lại tối đa cho mỗi MST
-
-
+crawler = None # 1. Khai báo biến global ở mức độ module
 # =============================
 # 🚀 STARTUP / SHUTDOWN
 # =============================
 @app.on_event("startup")
 async def startup():
-    global playwright, browser
+    global playwright, browser, crawler
     playwright = await async_playwright().start()
     browser = await playwright.chromium.launch(
         headless=True,
         args=["--disable-blink-features=AutomationControlled"]
     )
+    # CHỈ khởi tạo Class khi browser đã "sống"
+    crawler = TaxCrawler(browser, ua_helper, proxy_helper, tz_helper, locale_helper) #
 
 @app.on_event("shutdown")
 async def shutdown():
     await browser.close()
     await playwright.stop()
 
+
+'''
 # =============================
 # 🧠 JS EXTRACT (ONLY EXTRACT)
 # =============================
@@ -78,7 +80,7 @@ async def handle_route(route):
     else:
         await route.continue_()
 
-async def crawl_one(mst: str):
+async def crawl_one(mst: str, attempt: int =1):
     # 1. Lấy thông tin định danh ngẫu nhiên
     random_ua = ua_helper.get_random_ua()
     #random_proxy = proxy_helper.get_random_proxy()
@@ -158,14 +160,14 @@ async def crawl_one(mst: str):
         if not page.is_closed():
             await page.close()
         await context.close()
-
+'''
 
 # =============================
 # 🌐 API SINGLE
 # =============================
 @app.get("/crawl")
 async def crawl(mst: str):
-    return await crawl_one(mst)
+    return await crawler.crawl_with_retry(mst)
 
 
 
@@ -173,7 +175,7 @@ sem = asyncio.Semaphore(5) # Chỉ cho phép xử lý tối đa 5 MST cùng lúc
 
 async def safe_crawl(mst):
     async with sem:
-        return await crawl_one(mst)
+        return await crawler.crawl_with_retry(mst)
 
 
 # =============================
