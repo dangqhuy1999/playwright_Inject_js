@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  tax-crawler:
+    build: .
+    container_name: robolink_tax_crawler
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Ho_Chi_Minh
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
