@@ -16,11 +16,33 @@ class ProxyManager:
             "http://proxy_user2:pass2@5.6.7.8:8080",
             # Thêm danh sách proxy của bạn ở đây
         ]
+        # Dictionary lưu { proxy_url: timestamp_bi_chan }
+        self.blacklist = {}
+        self.blacklist_duration = 600  # 10 phút (600 giây)
 
     def get_random_proxy(self):
-        if not self.proxies:
+        current_time = time.time()
+        
+        # Làm sạch blacklist: Loại bỏ các proxy đã hết hạn 10 phút
+        self.blacklist = {
+            url: ts for url, ts in self.blacklist.items() 
+            if current_time - ts < self.blacklist_duration
+        }
+
+        # Lọc ra danh sách proxy còn dùng được (không nằm trong blacklist)
+        available_proxies = [p for p in self.all_proxies if p not in self.blacklist]
+
+        if not available_proxies:
+            print("⚠️ Tất cả Proxy đều bị Blacklist! Đang dùng tạm IP gốc...")
             return None
-        proxy_url = random.choice(self.proxies)
+            
+        proxy_url = random.choice(available_proxies)
         return {"server": proxy_url}
+
+    def add_to_blacklist(self, proxy_dict):
+        if proxy_dict and "server" in proxy_dict:
+            proxy_url = proxy_dict["server"]
+            self.blacklist[proxy_url] = time.time()
+            print(f"🚫 Đã đưa vào Blacklist: {proxy_url} (Tạm nghỉ 10 phút)")
 
 proxy_helper = ProxyManager()
