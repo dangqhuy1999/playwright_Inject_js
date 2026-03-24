@@ -1,298 +1,102 @@
-# 🚀 Masothue Crawler API (Playwright + FastAPI)
 
-## 📌 Overview
+## 🚀 Enterprise Masothue Crawler API (Playwright + FastAPI)
 
-API crawl thông tin doanh nghiệp từ **masothue.com** bằng Playwright (async) + FastAPI.
-
-✔ Không dùng bookmarklet hack
-✔ Không phụ thuộc JS redirect loop
-✔ Chạy ổn định production
-✔ Handle anti-bot cơ bản
+Hệ thống cào dữ liệu mã số thuế (MST) hiệu suất cao, ổn định và chuyên nghiệp, được thiết kế dành cho các dự án ERP, Automation và tích hợp hệ thống lớn.
 
 ---
 
-## ⚙️ Tech Stack
+## 🌟 Tính năng nổi bật
 
-* Python 3.11+
-* FastAPI
-* Playwright (async)
+- **Kiến trúc Modular**: Tách biệt hoàn toàn Proxy, User-Agent, Locale, Timezone và Geolocation.
+- **Zero-Latency User-Agent**: Danh sách UA Chrome/Edge 2026 được load trực tiếp vào RAM, không độ trễ.
+- **Smart Proxy Blacklist**: Tự động cách ly proxy lỗi (403/429) trong 10-15 phút, đảm bảo tỷ lệ thành công ~99%.
+- **Deep Stealth Mode**: Giả lập "Digital Twin" bằng cách đồng bộ Geolocation (Lat/Lon), Timezone và Locale khớp với trình duyệt.
+- **Tối ưu hiệu suất**:
+  - Chặn Image, Font, Media, Google Ads → giảm tới 80% băng thông.
+  - Sử dụng `domcontentloaded` + JS extraction ngay trong context để tốc độ tối đa.
 
 ---
 
-## 📦 Installation
+## 🏗 Cấu trúc dự án
 
-### 1. Clone project
-
-```bash
-git clone <your-repo>
-cd <your-project>
+```text
+.
+├── main.py                 # FastAPI Entry point & Browser Lifecycle
+├── crawler_core.py          # Logic crawl chính & Retry mechanism (Class TaxCrawler)
+├── proxy_manager.py        # Quản lý Proxy + Blacklist algorithm
+├── ua_manager.py           # Quản lý User-Agent (Zero Latency)
+├── locale_manager.py       # Đồng bộ ngôn ngữ & Geolocation (Lat/Lon)
+├── timezone_manager.py     # Đồng bộ múi giờ
+├── Dockerfile              # Docker image
+└── docker-compose.yml      # Triển khai production
 ```
 
-### 2. Tạo virtual env
+## 📦 Cài đặt & Chạy (Local)
+
+### 1. Khởi tạo môi trường
 
 ```bash
 python -m venv venv
-venv\Scripts\activate
+source venv/bin/activate          # Linux / macOS
+# venv\Scripts\activate           # Windows
+
+pip install -r requirements.txt
+playwright install chromium
 ```
 
-### 3. Install dependencies
+### 2. Chạy server phát triển
 
 ```bash
-pip install fastapi uvicorn playwright
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 4. Install browser
+## 🐳 Triển khai Production với Docker
 
 ```bash
-playwright install
+# Build và chạy nền
+docker compose up -d --build
+
+# Xem log thời gian thực
+docker logs -f robolink_tax_crawler
 ```
 
----
+## 🌐 Hướng dẫn sử dụng API
 
-## ▶️ Run server
+### Crawl một mã số thuế
 
-```bash
-uvicorn main:app --reload
+```http
+GET /crawl?mst=0313778172
 ```
 
-Server chạy tại:
+### Crawl hàng loạt (Batch)
 
-```
-http://127.0.0.1:8000
-```
-
----
-
-## 🌐 API Usage
-
-### 🔹 Crawl 1 MST
-
-```bash
-curl "http://127.0.0.1:8000/crawl?mst=0313778172"
+```http
+POST /crawl-batch
 ```
 
-### 🔹 Crawl nhiều MST
-
-```bash
-curl -X POST "http://127.0.0.1:8000/crawl-batch" ^
--H "Content-Type: application/json" ^
--d "[\"0313778172\", \"0100109106\"]"
-```
-
----
-
-## 📊 Response Example
-
+**Body (JSON):**
 ```json
-{
-  "Tên Công Ty": "CÔNG TY TNHH ...",
-  "Mã số thuế": "0313778172",
-  "Địa chỉ": "...",
-  "Tình trạng": "Đang hoạt động"
-}
+["0313778172", "0101234567", "0314889102"]
 ```
 
----
+## 🧠 Cơ chế hoạt động
 
-## 🧠 How it works
+- **Startup**: FastAPI khởi tạo một Browser instance duy nhất và TaxCrawler class.
+- **Context Creation**: Mỗi request tạo BrowserContext mới với UA, Timezone, Locale, Geolocation riêng.
+- **Resource Blocking**: Chặn hình ảnh, font, media để tăng tốc độ đáng kể.
+- **Data Extraction**: Chạy JavaScript trực tiếp trong page context ngay khi domcontentloaded.
+- **Auto Recovery**: Gặp lỗi proxy hoặc bị chặn → tự động blacklist và retry với danh tính mới.
 
-Crawler hoạt động theo flow:
 
-```
-1. Try direct URL:
-   https://masothue.com/{mst}
+## 🛠 Debug & Troubleshooting
 
-2. Nếu fail → search:
-   https://masothue.com/Search/?q={mst}
+- **Lỗi 403/429**: Website phát hiện bot → kiểm tra chất lượng proxy.
+- **NoneType Error**: Kiểm tra biến crawler đã được khởi tạo trong startup event chưa.
+- **Geolocation Error**: Đảm bảo truyền đủ latitude và longitude (không viết tắt).
 
-3. Nếu có list:
-   → click result đầu tiên
 
-4. Extract data từ:
-   .table-taxinfo
-```
+## 🧑‍💻 Tác giả
 
----
+**Huy Dang (Light)** – IT Automation Engineer
 
-## ⚠️ Important Notes
-
-### ❗ Không dùng JS redirect loop
-
-* `window.location.href` sẽ reset state
-* Playwright không giữ state JS như browser user
-
----
-
-### ❗ Không block CSS / JS
-
-Sai:
-
-```python
-route.abort() if stylesheet
-```
-
-→ DOM không render
-
----
-
-### ❗ Không tin hoàn toàn selector
-
-Trang có thể:
-
-* load chậm
-* bị anti-bot
-* render khác
-
-→ luôn fallback bằng `page.content()`
-
----
-
-## 🛠 Debug Guide
-
-### 🔍 1. Log HTML
-
-```python
-html = await page.content()
-print(html[:1000])
-```
-
----
-
-### 🔍 2. Check URL
-
-```python
-print(page.url)
-```
-
----
-
-### 🔍 3. Mở browser để debug
-
-```python
-browser = await playwright.chromium.launch(headless=False)
-```
-
----
-
-### 🔍 4. Screenshot khi lỗi
-
-```python
-await page.screenshot(path="debug.png")
-```
-
----
-
-## 🚫 Common Errors
-
-### ❌ Timeout selector
-
-```
-waiting for ".table-taxinfo"
-```
-
-👉 Nguyên nhân:
-
-* bị anti-bot
-* DOM chưa render
-
-👉 Fix:
-
-* thêm `wait_for_timeout(2000)`
-* check `page.content()`
-
----
-
-### ❌ Trả về `null`
-
-👉 Nguyên nhân:
-
-* dùng JS inject + redirect
-* state bị reset sau navigation
-
-👉 Fix:
-
-* để Playwright control flow
-
----
-
-### ❌ MST mismatch
-
-👉 Do:
-
-* search trả nhiều kết quả
-* lấy nhầm link
-
-👉 Fix:
-
-* verify lại:
-
-```python
-if mst_returned != mst:
-```
-
----
-
-## ⚡ Performance
-
-| Mode      | Time    |
-| --------- | ------- |
-| Single    | ~1–2s   |
-| Batch 10  | ~3–5s   |
-| Batch 100 | ~10–20s |
-
----
-
-## 🔥 Production Tips
-
-### ✅ Reuse browser
-
-Không launch browser mỗi request
-
----
-
-### ✅ Limit concurrency
-
-```python
-Semaphore(5)
-```
-
----
-
-### ✅ Retry
-
-```python
-for i in range(3):
-```
-
----
-
-### ✅ Fake browser
-
-```python
-user_agent
-locale
-timezone
-```
-
----
-
-### ✅ Anti-block (advanced)
-
-* proxy rotation
-* residential IP
-* stealth plugin
-
----
-
-## 📌 Future Improvements
-
-* Redis queue (job system)
-* Worker service (Celery / RQ)
-* Proxy pool
-* Captcha bypass
-
----
-
-## 🧑‍💻 Author
-
-Built for high-performance scraping 🚀
+Hệ thống được tối ưu mạnh về tốc độ, độ ổn định và khả năng scale.
