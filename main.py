@@ -55,8 +55,12 @@ JS_EXTRACT = """
 })();
 """
 
-async def handle_route(route, request):
-    if "doubleclick" in request.url:
+async def handle_route(route):
+    # Chặn tất cả những thứ không cần thiết để lấy dữ liệu
+    excluded_resource_types = ["image", "media", "font", "stylesheet"]
+    if route.request.resource_type in excluded_resource_types:
+        await route.abort()
+    elif "google" in route.request.url or "doubleclick" in route.request.url:
         await route.abort()
     else:
         await route.continue_()
@@ -65,54 +69,56 @@ async def handle_route(route, request):
 # =============================
 
 
+# ... các phần import giữ nguyên ...
+
+async def handle_route(route):
+    # Chặn tất cả những thứ không cần thiết để lấy dữ liệu
+    excluded_resource_types = ["image", "media", "font", "stylesheet"]
+    if route.request.resource_type in excluded_resource_types:
+        await route.abort()
+    elif "google" in route.request.url or "doubleclick" in route.request.url:
+        await route.abort()
+    else:
+        await route.continue_()
+
 async def crawl_one(mst: str):
-    context = await browser.new_context(
-    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-    locale="vi-VN",
-    timezone_id="Asia/Ho_Chi_Minh",
-    viewport={"width": 1280, "height": 800}
-)
+    # 1. Tạo context với cấu hình tối giản
+    context = await browser.new_context(user_agent="Mozilla/5.0...")
     page = await context.new_page()
 
     try:
+        # 2. Áp dụng chặn tài nguyên
         await page.route("**/*", handle_route)
 
-        await page.goto(
-            f"https://masothue.com/Search/?q={mst}&type=enterpriseTax&force-search=0"
-        )
+        # 3. Sử dụng wait_until="domcontentloaded" thay vì "networkidle" (nhanh hơn rất nhiều)
+        url = f"https://masothue.com/Search/?q={mst}&type=enterpriseTax&force-search=0"
+        await page.goto(url, wait_until="domcontentloaded")
 
-        await page.wait_for_load_state("networkidle")
-        await page.wait_for_timeout(2000)
+        # 4. Đợi selector cụ thể, không dùng timeout bừa bãi
+        # Chờ xem nó ra bảng info hay ra danh sách
+        try:
+            await page.wait_for_selector(".table-taxinfo, .tax-listing", timeout=5000)
+        except:
+            return {"error": "Timeout hoặc không tìm thấy MST"}
 
-        html = await page.content()
-
-        # ======================
-        # 🥇 DETAIL
-        # ======================
-        if "table-taxinfo" in html:
+        # Kiểm tra nhanh bằng locator thay vì lấy toàn bộ content HTML
+        if await page.locator(".table-taxinfo").count() > 0:
             return await page.evaluate(JS_EXTRACT)
 
-        # ======================
-        # 🥈 LIST
-        # ======================
-        if "tax-listing" in html:
+        if await page.locator(".tax-listing").count() > 0:
             link = page.locator(".tax-listing h3 a").first
             href = await link.get_attribute("href")
-
-            if not href:
-                return {"error": "no link"}
-
-            await page.goto("https://masothue.com" + href)
-
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(2000)
-
-            return await page.evaluate(JS_EXTRACT)
+            if href:
+                # Đi thẳng đến trang chi tiết
+                await page.goto("https://masothue.com" + href, wait_until="domcontentloaded")
+                await page.wait_for_selector(".table-taxinfo")
+                return await page.evaluate(JS_EXTRACT)
 
         return {"error": "no data rendered"}
 
     finally:
-        await context.close()
+        await page.close() # Đóng page thôi
+        await context.close() # Đóng context để giải phóng ram
 
 
 # =============================
@@ -122,11 +128,17 @@ async def crawl_one(mst: str):
 async def crawl(mst: str):
     return await crawl_one(mst)
 
+sem = asyncio.Semaphore(5) # Chỉ cho phép xử lý tối đa 5 MST cùng lúc
+
+async def safe_crawl(mst):
+    async with sem:
+        return await crawl_one(mst)
+
 
 # =============================
 # ⚡ API BATCH (PARALLEL)
 # =============================
 @app.post("/crawl-batch")
 async def crawl_batch(msts: List[str]):
-    tasks = [crawl_one(mst) for mst in msts]
+    tasks = [safe_crawl(mst) for mst in msts]
     return await asyncio.gather(*tasks)
