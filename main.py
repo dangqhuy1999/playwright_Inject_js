@@ -1,39 +1,47 @@
 import asyncio
 asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
+import random
 #local build
 from ua_manager import ua_helper
 from proxy_manager import proxy_helper
+from locale_manager import locale_helper
+from timezone_manager import tz_helper
+from crawler_core import TaxCrawler
 
 from fastapi import FastAPI
 from playwright.async_api import async_playwright
 from typing import List
+import pathlib
+
+# Xác định đường dẫn lưu data (ví dụ thư mục 'user_data' ngay tại project)
+USER_DATA_DIR = pathlib.Path(__file__).parent / "user_data"
 
 app = FastAPI()
 
-
 playwright = None
 browser = None
-MAX_RETRIES = 3  # Số lần thử lại tối đa cho mỗi MST
-
-
+crawler = None # 1. Khai báo biến global ở mức độ module
 # =============================
 # 🚀 STARTUP / SHUTDOWN
 # =============================
 @app.on_event("startup")
 async def startup():
-    global playwright, browser
+    global playwright, browser, crawler
     playwright = await async_playwright().start()
     browser = await playwright.chromium.launch(
         headless=True,
         args=["--disable-blink-features=AutomationControlled"]
     )
+    # CHỈ khởi tạo Class khi browser đã "sống"
+    crawler = TaxCrawler(browser, ua_helper, proxy_helper, tz_helper, locale_helper) #
 
 @app.on_event("shutdown")
 async def shutdown():
     await browser.close()
     await playwright.stop()
 
+
+'''
 # =============================
 # 🧠 JS EXTRACT (ONLY EXTRACT)
 # =============================
@@ -76,18 +84,24 @@ async def handle_route(route):
     else:
         await route.continue_()
 
-async def crawl_one(mst: str):
+async def crawl_one(mst: str, attempt: int =1):
     # 1. Lấy thông tin định danh ngẫu nhiên
     random_ua = ua_helper.get_random_ua()
     #random_proxy = proxy_helper.get_random_proxy()
-
+    loc_params = locale_helper.get_context_params()
+    # Giả sử bạn biết Proxy của mình thuộc quốc gia nào (Ví dụ: VN)
+    # Nếu dùng Proxy xoay vòng toàn cầu, bạn có thể để get_random_config()
+    current_config = tz_helper.get_config_by_country("VN")
+    
     # 2. Khởi tạo context với cấu hình "giả lập" người dùng
     context = await browser.new_context(
         user_agent=random_ua,
         #proxy=random_proxy,
         
-        locale="vi-VN",
-        timezone_id="Asia/Ho_Chi_Minh",
+        locale=loc_params["locale"],
+        timezone_id=current_config["timezone"],
+        geolocation=loc_params["geo"],
+        permissions=["geolocation"], # Cho phép web check vị trí nếu cần
         # Invisible info
         viewport={"width": 1920, "height": 1080}, # Dùng độ phân giải phổ biến
         device_scale_factor=1,
@@ -108,9 +122,10 @@ async def crawl_one(mst: str):
             timeout=10000 # Giới hạn 10s cho mỗi trang
         )
 
-        # Kiểm tra nếu bị Bot Detector chặn (Status 403 hoặc 429)
+        # Nếu bị chặn bởi Server (Anti-bot)
         if response.status in [403, 429]:
-            raise Exception(f"Blocked by Anti-bot (Status {response.status})")
+            proxy_helper.add_to_blacklist(current_proxy) # Chặn ngay proxy này
+            raise Exception(f"Bị chặn bởi Anti-bot: {response.status}")
 
         # 4. Đợi selector cụ thể, không dùng timeout bừa bãi
         # Chờ xem nó ra bảng info hay ra danh sách
@@ -135,31 +150,28 @@ async def crawl_one(mst: str):
         return {"error": "no data rendered"}
 
     except Exception as e:
-        print(f"⚠️ Lần thử {attempt} cho MST {mst} thất bại: {str(e)}")
-        
+        # Nếu lỗi do Proxy chết (Connection Error, Timeout)
+        if "timeout" in str(e).lower() or "connection" in str(e).lower():
+            proxy_helper.add_to_blacklist(current_proxy)
+
         if attempt < MAX_RETRIES:
-            # Đóng tài nguyên cũ trước khi thử lại
             await page.close()
             await context.close()
-            
-            # Nghỉ một chút trước khi đổi IP/UA mới (tránh bị dính chùm)
-            await asyncio.sleep(1) 
             return await crawl_with_retry(mst, attempt + 1)
-        else:
-            return {"mst": mst, "error": "Max retries reached", "last_error": str(e)}
-
+        
+        return {"status": "failed", "error": str(e)}
     finally:
         if not page.is_closed():
             await page.close()
         await context.close()
-
+'''
 
 # =============================
 # 🌐 API SINGLE
 # =============================
 @app.get("/crawl")
 async def crawl(mst: str):
-    return await crawl_one(mst)
+    return await crawler.crawl_with_retry(mst)
 
 
 
@@ -167,7 +179,7 @@ sem = asyncio.Semaphore(5) # Chỉ cho phép xử lý tối đa 5 MST cùng lúc
 
 async def safe_crawl(mst):
     async with sem:
-        return await crawl_one(mst)
+        return await crawler.crawl_with_retry(mst)
 
 
 # =============================
